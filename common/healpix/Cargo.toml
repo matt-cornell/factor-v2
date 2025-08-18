@@ -1,7 +1,9 @@
 [package]
-name = "factor-server"
+name = "factor-healpix"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
+bevy_math.workspace = true
+healpix = "0.3.2"
