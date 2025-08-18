@@ -1,0 +1,16 @@
+[workspace]
+resolver = "3"
+members = ["client", "server"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[package]
+name = "factor"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
