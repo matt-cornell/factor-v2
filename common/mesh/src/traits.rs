@@ -247,11 +247,30 @@ pub trait TetraMesh {
     type Vertex: VertexData;
     /// The type to use for tetrahedra.
     type Tetra: TetraData<Self::Key>;
+    /// Iterator type returned from [`Self::verts`].
+    type VertsIter<'a>: Iterator<Item = (VertexId<Self::Key>, &'a Self::Vertex)>
+    where
+        Self: 'a;
+    /// Iterator type returned from [`Self::Tetras`].
+    type TetrasIter<'a>: Iterator<Item = (TetraId<Self::Key>, &'a Self::Tetra)>
+    where
+        Self: 'a;
 
     /// Get the vertex with the specified index.
     fn get_vertex(&self, id: VertexId<Self::Key>) -> Option<&Self::Vertex>;
     /// Get the tetrahedron with the specified index.
     fn get_tetra(&self, id: TetraId<Self::Key>) -> Option<&Self::Tetra>;
+
+    /// Iterate over the vertices.
+    fn verts(&self) -> Self::VertsIter<'_>;
+    /// Iterate over the tetrahedra.
+    fn tetras(&self) -> Self::TetrasIter<'_>;
+    /// Quickly get the bounds for this mesh.
+    ///
+    /// The default value is `[Vec3::NEG_INFINITY, Vec3::INFINITY]`, but a more precise set of bounds should probably be used.
+    fn bounds(&self) -> [Vec3; 2] {
+        [Vec3::NEG_INFINITY, Vec3::INFINITY]
+    }
 }
 
 /// A mutable tetrahedral mesh.

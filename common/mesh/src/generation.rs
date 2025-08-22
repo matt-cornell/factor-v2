@@ -2,18 +2,22 @@ use std::fmt::{self, Debug, Display, Formatter};
 use std::mem::MaybeUninit;
 use std::ops::{Index, IndexMut};
 
+/// A type that acts like `Option<T>`, but with a generation count.
 pub trait OptWithGeneration: Default {
     type Generation: Generation;
     type Value;
 
     fn has_value(&self) -> bool;
-    fn has_gen(&self, generation: &Self::Generation) -> bool;
+    fn has_gen(&self, generation: Self::Generation) -> bool;
     fn drop_value_unchecked(&mut self) -> Option<Self::Value>;
     fn insert_value(&mut self, val: Self::Value) -> Self::Generation;
+    fn get_unchecked(&self) -> Option<&Self::Value>;
+    fn get_unchecked_mut(&mut self) -> Option<&mut Self::Value>;
     fn get(&self, generation: Self::Generation) -> Option<&Self::Value>;
     fn get_mut(&mut self, generation: Self::Generation) -> Option<&mut Self::Value>;
+    fn generation(&self) -> Option<Self::Generation>;
     fn drop_value_checked(&mut self, generation: Self::Generation) -> Option<Self::Value> {
-        self.has_gen(&generation)
+        self.has_gen(generation)
             .then(|| self.drop_value_unchecked())
             .flatten()
     }
@@ -30,7 +34,7 @@ impl<T> OptWithGeneration for Option<T> {
     fn has_value(&self) -> bool {
         self.is_some()
     }
-    fn has_gen(&self, _generation: &Self::Generation) -> bool {
+    fn has_gen(&self, _generation: Self::Generation) -> bool {
         self.is_some()
     }
     fn drop_value_unchecked(&mut self) -> Option<Self::Value> {
@@ -42,11 +46,20 @@ impl<T> OptWithGeneration for Option<T> {
     fn insert_value(&mut self, val: Self::Value) {
         *self = Some(val);
     }
+    fn get_unchecked(&self) -> Option<&Self::Value> {
+        self.as_ref()
+    }
+    fn get_unchecked_mut(&mut self) -> Option<&mut Self::Value> {
+        self.as_mut()
+    }
     fn get(&self, _generation: Self::Generation) -> Option<&Self::Value> {
         self.as_ref()
     }
     fn get_mut(&mut self, _generation: Self::Generation) -> Option<&mut Self::Value> {
         self.as_mut()
+    }
+    fn generation(&self) -> Option<Self::Generation> {
+        self.as_ref().map(drop)
     }
     fn with_value(val: Self::Value) -> (Self, Self::Generation) {
         (Some(val), ())
@@ -100,6 +113,7 @@ pub trait HasGeneration {
     type Generation: Generation;
     type Type<T>: OptWithGeneration<Value = T, Generation = Self::Generation>;
 }
+#[diagnostic::do_not_recommend]
 impl<const BITS: usize> HasGeneration for BitMarker<BITS>
 where
     Self: HasIntegerSize,
@@ -130,12 +144,55 @@ where
         }
     }
 }
+impl<T, const BITS: usize> Drop for Generational<T, BITS>
+where
+    BitMarker<BITS>: HasIntegerSize,
+{
+    fn drop(&mut self) {
+        if self.has_value() {
+            unsafe {
+                self.value.assume_init_drop();
+            }
+        }
+    }
+}
 impl<T, const BITS: usize> Default for Generational<T, BITS>
 where
     BitMarker<BITS>: HasIntegerSize,
 {
     fn default() -> Self {
         Self::new()
+    }
+}
+impl<T: Debug, const BITS: usize> Debug for Generational<T, BITS>
+where
+    BitMarker<BITS>: HasIntegerSize,
+{
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        let mut s = f.debug_struct("Generational");
+        let has_value = self.has_value();
+        s.field("has_value", &has_value);
+        if has_value {
+            unsafe {
+                s.field("value", self.value.assume_init_ref());
+            }
+        }
+        s.finish_non_exhaustive()
+    }
+}
+impl<T: Clone, const BITS: usize> Clone for Generational<T, BITS>
+where
+    BitMarker<BITS>: HasIntegerSize,
+{
+    fn clone(&self) -> Self {
+        Self {
+            generation: self.generation,
+            value: if self.has_value() {
+                unsafe { MaybeUninit::new(self.value.assume_init_ref().clone()) }
+            } else {
+                MaybeUninit::uninit()
+            },
+        }
     }
 }
 impl<T, const BITS: usize> OptWithGeneration for Generational<T, BITS>
@@ -148,8 +205,8 @@ where
     fn has_value(&self) -> bool {
         self.generation.is_odd()
     }
-    fn has_gen(&self, generation: &Self::Generation) -> bool {
-        self.generation == *generation
+    fn has_gen(&self, generation: Self::Generation) -> bool {
+        self.generation == generation
     }
     fn drop_value_unchecked(&mut self) -> Option<Self::Value> {
         self.has_value().then(|| unsafe {
@@ -158,7 +215,7 @@ where
         })
     }
     fn drop_value_checked(&mut self, generation: Self::Generation) -> Option<Self::Value> {
-        self.has_gen(&generation).then(|| unsafe {
+        self.has_gen(generation).then(|| unsafe {
             self.generation.make_even();
             self.value.assume_init_read()
         })
@@ -177,13 +234,24 @@ where
         }
         g
     }
+    fn get_unchecked(&self) -> Option<&Self::Value> {
+        self.has_value()
+            .then(|| unsafe { self.value.assume_init_ref() })
+    }
+    fn get_unchecked_mut(&mut self) -> Option<&mut Self::Value> {
+        self.has_value()
+            .then(|| unsafe { self.value.assume_init_mut() })
+    }
     fn get(&self, generation: Self::Generation) -> Option<&Self::Value> {
-        self.has_gen(&generation)
+        self.has_gen(generation)
             .then(|| unsafe { self.value.assume_init_ref() })
     }
     fn get_mut(&mut self, generation: Self::Generation) -> Option<&mut Self::Value> {
-        self.has_gen(&generation)
+        self.has_gen(generation)
             .then(|| unsafe { self.value.assume_init_mut() })
+    }
+    fn generation(&self) -> Option<Self::Generation> {
+        self.generation.is_odd().then_some(self.generation)
     }
     fn with_value(val: Self::Value) -> (Self, Self::Generation) {
         (
@@ -313,7 +381,7 @@ where
     ) -> bool {
         self.elems
             .get(index.index)
-            .is_some_and(|v| v.has_gen(&index.generation))
+            .is_some_and(|v| v.has_gen(index.generation))
     }
     pub fn get(
         &self,
@@ -326,6 +394,51 @@ where
         index: GenerationIndex<<BitMarker<BITS> as HasGeneration>::Generation>,
     ) -> Option<&mut T> {
         self.elems.get_mut(index.index)?.get_mut(index.generation)
+    }
+    pub fn iter(&self) -> Iter<'_, <BitMarker<BITS> as HasGeneration>::Type<T>> {
+        Iter {
+            iter: self.elems.iter(),
+            index: 0,
+        }
+    }
+    pub fn iter_mut(&mut self) -> IterMut<'_, <BitMarker<BITS> as HasGeneration>::Type<T>> {
+        IterMut {
+            iter: self.elems.iter_mut(),
+            index: 0,
+        }
+    }
+    pub fn values(&self) -> Values<'_, <BitMarker<BITS> as HasGeneration>::Type<T>> {
+        Values {
+            iter: self.elems.iter(),
+        }
+    }
+    pub fn values_mut(&mut self) -> ValuesMut<'_, <BitMarker<BITS> as HasGeneration>::Type<T>> {
+        ValuesMut {
+            iter: self.elems.iter_mut(),
+        }
+    }
+}
+impl<T: Debug, const BITS: usize> Debug for Slab<T, BITS>
+where
+    BitMarker<BITS>: HasGeneration<Generation: Debug>,
+{
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.debug_map().entries(self.iter()).finish_non_exhaustive()
+    }
+}
+impl<T: Clone, const BITS: usize> Clone for Slab<T, BITS>
+where
+    BitMarker<BITS>: HasGeneration<Type<T>: Clone>,
+{
+    fn clone(&self) -> Self {
+        Self {
+            elems: self.elems.clone(),
+            first_free: self.first_free,
+        }
+    }
+    fn clone_from(&mut self, source: &Self) {
+        self.elems.clone_from(&source.elems);
+        self.first_free = source.first_free;
     }
 }
 impl<T, const BITS: usize> Index<GenerationIndex<<BitMarker<BITS> as HasGeneration>::Generation>>
@@ -354,5 +467,73 @@ where
     ) -> &mut Self::Output {
         self.get_mut(index)
             .unwrap_or_else(|| panic!("index {index} not present in slab"))
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Iter<'a, G> {
+    iter: std::slice::Iter<'a, G>,
+    index: usize,
+}
+impl<'a, G: OptWithGeneration> Iterator for Iter<'a, G> {
+    type Item = (GenerationIndex<G::Generation>, &'a G::Value);
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.find_map(|v| {
+            let index = self.index;
+            self.index += 1;
+            let generation = v.generation()?;
+            Some((
+                GenerationIndex::new(index, generation),
+                v.get_unchecked().unwrap(),
+            ))
+        })
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (0, Some(self.iter.len()))
+    }
+}
+
+#[derive(Debug)]
+pub struct IterMut<'a, G> {
+    iter: std::slice::IterMut<'a, G>,
+    index: usize,
+}
+impl<'a, G: OptWithGeneration> Iterator for IterMut<'a, G> {
+    type Item = (GenerationIndex<G::Generation>, &'a mut G::Value);
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.find_map(|v| {
+            let index = self.index;
+            self.index += 1;
+            let generation = v.generation()?;
+            Some((
+                GenerationIndex::new(index, generation),
+                v.get_unchecked_mut().unwrap(),
+            ))
+        })
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (0, Some(self.iter.len()))
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Values<'a, G> {
+    iter: std::slice::Iter<'a, G>,
+}
+impl<'a, G: OptWithGeneration> Iterator for Values<'a, G> {
+    type Item = &'a G::Value;
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.find_map(G::get_unchecked)
+    }
+}
+
+#[derive(Debug)]
+pub struct ValuesMut<'a, G> {
+    iter: std::slice::IterMut<'a, G>,
+}
+impl<'a, G: OptWithGeneration> Iterator for ValuesMut<'a, G> {
+    type Item = &'a mut G::Value;
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.find_map(G::get_unchecked_mut)
     }
 }
