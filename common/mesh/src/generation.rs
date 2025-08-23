@@ -371,9 +371,14 @@ where
         &mut self,
         index: GenerationIndex<<BitMarker<BITS> as HasGeneration>::Generation>,
     ) -> Option<T> {
-        self.elems
+        let res = self
+            .elems
             .get_mut(index.index)?
-            .drop_value_checked(index.generation)
+            .drop_value_checked(index.generation);
+        if res.is_some() && index.index < self.first_free {
+            self.first_free = index.index;
+        }
+        res
     }
     pub fn contains(
         &self,
@@ -394,6 +399,10 @@ where
         index: GenerationIndex<<BitMarker<BITS> as HasGeneration>::Generation>,
     ) -> Option<&mut T> {
         self.elems.get_mut(index.index)?.get_mut(index.generation)
+    }
+    /// Get the maximum index for the slab.
+    pub const fn max_idx(&self) -> usize {
+        self.elems.len()
     }
     pub fn iter(&self) -> Iter<'_, <BitMarker<BITS> as HasGeneration>::Type<T>> {
         Iter {

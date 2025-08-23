@@ -1,5 +1,8 @@
 //! Core traits and default representation for tetrahedral meshes.
 
+use std::collections::{HashMap, HashSet};
+use std::hash::Hash;
+
 use bevy_math::Vec3;
 
 /// A vertex index
@@ -33,7 +36,7 @@ impl VertexIdx {
     pub fn in_arr_mut<T>(self, arr: &mut [T; 4]) -> &mut T {
         unsafe { arr.get_unchecked_mut(self.to_usize()) }
     }
-    /// Extract the value from an arry, and return the remaining three elements.
+    /// Extract the value from an array, and return the remaining three elements.
     ///
     /// The final elements will start after the index and wrap around—`VertexIdx::V1.extract([a, b, c, d]) == (b, [c, d, a])`.
     #[inline(always)]
@@ -45,6 +48,43 @@ impl VertexIdx {
             Self::V2 => (c, [d, a, b]),
             Self::V3 => (d, [a, b, c]),
         }
+    }
+    /// Like [`Self::extract`], but with a reference to an array.
+    #[inline(always)]
+    pub fn extract_ref<T>(self, arr: &[T; 4]) -> (&T, [&T; 3]) {
+        let [a, b, c, d] = arr;
+        match self {
+            Self::V0 => (a, [b, c, d]),
+            Self::V1 => (b, [c, d, a]),
+            Self::V2 => (c, [d, a, b]),
+            Self::V3 => (d, [a, b, c]),
+        }
+    }
+    /// Like [`Self::extract`], but with a mutable reference to an array.
+    #[inline(always)]
+    pub fn extract_mut<T>(self, arr: &mut [T; 4]) -> (&mut T, [&mut T; 3]) {
+        let [a, b, c, d] = arr;
+        match self {
+            Self::V0 => (a, [b, c, d]),
+            Self::V1 => (b, [c, d, a]),
+            Self::V2 => (c, [d, a, b]),
+            Self::V3 => (d, [a, b, c]),
+        }
+    }
+    pub fn others(self) -> [Self; 3] {
+        match self {
+            Self::V0 => [Self::V1, Self::V2, Self::V3],
+            Self::V1 => [Self::V2, Self::V3, Self::V0],
+            Self::V2 => [Self::V3, Self::V0, Self::V1],
+            Self::V3 => [Self::V0, Self::V1, Self::V2],
+        }
+    }
+    /// Increment self, wrapping around.
+    pub fn increment(&mut self) -> &mut Self {
+        unsafe {
+            *self = std::mem::transmute::<u8, Self>((*self as u8 + 1) & 3);
+        }
+        self
     }
 }
 
@@ -242,7 +282,7 @@ pub struct TetraId<K>(pub K);
 /// A tetrahedral mesh.
 pub trait TetraMesh {
     /// A key type to use for indices.
-    type Key: Copy;
+    type Key: Copy + Hash + Eq;
     /// The type to use for vertices.
     type Vertex: VertexData;
     /// The type to use for tetrahedra.
@@ -270,6 +310,60 @@ pub trait TetraMesh {
     /// The default value is `[Vec3::NEG_INFINITY, Vec3::INFINITY]`, but a more precise set of bounds should probably be used.
     fn bounds(&self) -> [Vec3; 2] {
         [Vec3::NEG_INFINITY, Vec3::INFINITY]
+    }
+    /// Get the points and faces on the outside of this mesh.
+    ///
+    /// This method is called "primitve" because it discards all vertex and tetrahedron information aside from the basic geometry.
+    fn primitive_surface(&self) -> (Vec<Vec3>, Vec<[u32; 3]>) {
+        let mut mapping = HashMap::new();
+        let mut verts = Vec::new();
+        let mut faces = Vec::new();
+        for (_, tet) in self.tetras() {
+            let mut local_verts = [None; 4];
+            for idx in VertexIdx::VALS {
+                if tet.face(idx).is_none() {
+                    let mut i2 = idx;
+                    let face = idx.extract_mut(&mut local_verts).1.map(|o| {
+                        *o.get_or_insert_with(|| {
+                            *mapping
+                                .entry(tet.vertex(*i2.increment()))
+                                .or_insert_with_key(|&id| {
+                                    let idx = verts.len();
+                                    verts.push(
+                                        self.get_vertex(id)
+                                            .expect("face points to a non-existent vertex")
+                                            .as_vec3(),
+                                    );
+                                    idx as u32
+                                })
+                        })
+                    });
+                    faces.push(face);
+                }
+            }
+        }
+        (verts, faces)
+    }
+    /// Extend a collection with external points.
+    fn external_points<C: Extend<Vec3>>(&self, verts: &mut C) {
+        let mut seen = HashSet::new();
+        for (_, tet) in self.tetras() {
+            let mut count = 0;
+            for idx in VertexIdx::VALS {
+                if tet.face(idx).is_none() {
+                    for v in idx.others() {
+                        let id = tet.vertex(v);
+                        if seen.insert(id) {
+                            verts.extend(self.get_vertex(id).map(VertexData::as_vec3));
+                        }
+                    }
+                    count += 1;
+                    if count == 2 {
+                        break;
+                    }
+                }
+            }
+        }
     }
 }
 

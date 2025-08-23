@@ -2,6 +2,7 @@ use crate::generation::*;
 use crate::traits::*;
 use bevy_math::Vec3;
 use std::fmt::{self, Debug, Formatter};
+use std::hash::Hash;
 use std::marker::PhantomData;
 
 fn add_point([lower, upper]: &mut [Vec3; 2], point: Vec3) {
@@ -112,6 +113,26 @@ where
     fn bounds(&self) -> [Vec3; 2] {
         self.bounds
     }
+    fn external_points<C: Extend<Vec3>>(&self, verts: &mut C) {
+        let mut seen = fixedbitset::FixedBitSet::with_capacity(self.verts.max_idx());
+        for (_, tet) in self.tetras() {
+            let mut count = 0;
+            for idx in VertexIdx::VALS {
+                if tet.face(idx).is_none() {
+                    for v in idx.others() {
+                        let id = tet.vertex(v);
+                        if !seen.put(id.0.unpack().0) {
+                            verts.extend(self.get_vertex(id).map(VertexData::as_vec3));
+                        }
+                    }
+                    count += 1;
+                    if count == 2 {
+                        break;
+                    }
+                }
+            }
+        }
+    }
 }
 impl<K: SlabKey<GEN_BITS>, V: VertexDataMut, T: TetraDataMut<K>, const GEN_BITS: usize> TetraMeshMut
     for SlabMesh<K, V, T, GEN_BITS>
@@ -198,7 +219,7 @@ where
 #[diagnostic::on_unimplemented(
     message = "`{Self}` is not a valid key for a {BITS}-bit generation counter"
 )]
-pub trait SlabKey<const BITS: usize>: Copy
+pub trait SlabKey<const BITS: usize>: Copy + Hash + Eq
 where
     BitMarker<BITS>: HasGeneration,
 {
@@ -228,7 +249,7 @@ macro_rules! impl_slab_key {
             }
             impl<const BITS: usize> SlabKey<BITS> for ($int, <BitMarker<BITS> as HasGeneration>::Generation)
             where
-                BitMarker<BITS>: HasGeneration,
+                BitMarker<BITS>: HasGeneration<Generation: Hash + Eq>,
             {
                 fn pack(index: usize, generation: <BitMarker<BITS> as HasGeneration>::Generation) -> Self {
                     (index as _, generation)
