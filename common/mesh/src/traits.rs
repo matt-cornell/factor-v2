@@ -306,7 +306,7 @@ pub struct TetraId<K>(pub K);
 /// A tetrahedral mesh.
 pub trait TetraMesh {
     /// A key type to use for indices.
-    type Key: Copy + Hash + Eq;
+    type Key: Copy + Hash + Eq + Debug;
     /// The type to use for vertices.
     type Vertex: VertexData;
     /// The type to use for tetrahedra.
@@ -343,24 +343,21 @@ pub trait TetraMesh {
     fn append_primitive_surface(&self, verts: &mut Vec<Vec3>, faces: &mut Vec<[u32; 3]>) {
         let mut mapping = HashMap::new();
         for (_, tet) in self.tetras() {
-            let mut local_verts = [None; 4];
             for idx in VertexIdx::VALS {
                 if tet.face(idx).is_none() {
                     let mut i2 = idx;
-                    let face = idx.extract_mut(&mut local_verts).1.map(|o| {
-                        *o.get_or_insert_with(|| {
-                            *mapping
-                                .entry(tet.vertex(*i2.increment()))
-                                .or_insert_with_key(|&id| {
-                                    let idx = verts.len();
-                                    verts.push(
-                                        self.get_vertex(id)
-                                            .expect("face points to a non-existent vertex")
-                                            .as_vec3(),
-                                    );
-                                    idx as u32
-                                })
-                        })
+                    let face = std::array::from_fn(|_| {
+                        *mapping
+                            .entry(tet.vertex(*i2.increment()))
+                            .or_insert_with_key(|&id| {
+                                let idx = verts.len();
+                                verts.push(
+                                    self.get_vertex(id)
+                                        .expect("face points to a non-existent vertex")
+                                        .as_vec3(),
+                                );
+                                idx as u32
+                            })
                     });
                     faces.push(face);
                 }

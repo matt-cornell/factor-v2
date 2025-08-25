@@ -10,6 +10,10 @@ fn main() {
             WireframePlugin::default(),
             bevy_flycam::PlayerPlugin,
         ))
+        .insert_resource(AmbientLight {
+            brightness: 250.0,
+            ..default()
+        })
         .add_systems(Startup, startup)
         .add_systems(Update, (sync_meshes, handle_keypresses))
         .add_observer(recompute_normals)
@@ -24,17 +28,20 @@ fn startup(mut commands: Commands, mut materials: ResMut<Assets<StandardMaterial
     Octahedron::CENTERED
         .translate(Vec3::NEG_X * 2.0)
         .append_to(&mut mesh);
-    println!("{mesh:#?}");
-    commands.spawn(PointLight {
-        color: Color::WHITE,
-        intensity: 100.0,
-        ..default()
-    });
+    commands.spawn((
+        PointLight {
+            color: Color::WHITE,
+            intensity: 10000.0,
+            ..default()
+        },
+        Transform::from_xyz(0.0, 5.0, 0.0),
+    ));
     commands.spawn((
         DynMesh::from(mesh),
         SurfaceSync::default(),
         MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: Color::BLACK,
+            base_color: Color::linear_rgba(1.0, 0.5, 0.5, 0.5),
+            alpha_mode: AlphaMode::Blend,
             cull_mode: None,
             ..default()
         })),
@@ -56,13 +63,13 @@ fn recompute_normals(
 fn handle_keypresses(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut wireframe: ResMut<WireframeConfig>,
-    mut query: Query<&mut SurfaceSync>,
+    mut sync_query: Query<&mut SurfaceSync>,
 ) {
     if keyboard.just_pressed(KeyCode::KeyF) {
         wireframe.global = !wireframe.global;
     }
     if keyboard.just_pressed(KeyCode::KeyI) {
-        for mut s in query.iter_mut() {
+        for mut s in sync_query.iter_mut() {
             s.internal = !s.internal;
         }
     }

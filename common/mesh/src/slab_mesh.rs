@@ -239,7 +239,7 @@ where
 #[diagnostic::on_unimplemented(
     message = "`{Self}` is not a valid key for a {BITS}-bit generation counter"
 )]
-pub trait SlabKey<const BITS: usize>: Copy + Hash + Eq
+pub trait SlabKey<const BITS: usize>: Copy + Hash + Eq + Debug
 where
     BitMarker<BITS>: HasGeneration,
 {
@@ -269,7 +269,7 @@ macro_rules! impl_slab_key {
             }
             impl<const BITS: usize> SlabKey<BITS> for ($int, <BitMarker<BITS> as HasGeneration>::Generation)
             where
-                BitMarker<BITS>: HasGeneration<Generation: Hash + Eq>,
+                BitMarker<BITS>: HasGeneration<Generation: Hash + Eq + Debug>,
             {
                 fn pack(index: usize, generation: <BitMarker<BITS> as HasGeneration>::Generation) -> Self {
                     (index as _, generation)

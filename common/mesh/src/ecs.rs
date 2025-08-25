@@ -154,7 +154,6 @@ pub fn sync_meshes(
             };
 
             if item.sync.internal {
-                println!("internal remeshing (reused)");
                 verts.clear();
                 faces.clear();
                 item.mesh.0.append_all(&mut verts, &mut faces);
@@ -170,7 +169,6 @@ pub fn sync_meshes(
             let mut verts = Vec::new();
             let mut faces = Vec::new();
             if item.sync.internal {
-                println!("internal remeshing (new)");
                 item.mesh.0.append_all(&mut verts, &mut faces);
             } else {
                 item.mesh
