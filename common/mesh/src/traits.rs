@@ -1,9 +1,10 @@
 //! Core traits and default representation for tetrahedral meshes.
 
-use std::collections::{HashMap, HashSet};
-use std::hash::Hash;
-
 use bevy_math::Vec3;
+use std::any::Any;
+use std::collections::{HashMap, HashSet};
+use std::fmt::{self, Debug, Formatter};
+use std::hash::Hash;
 
 /// A vertex index
 ///
@@ -184,12 +185,17 @@ macro_rules! for_int {
                     self.0 != <$int>::MAX
                 }
             }
+            impl Debug for PackedFace<$int> {
+                fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+                    Debug::fmt(&self.into_option(), f)
+                }
+            }
         )*
     };
 }
 for_int!(u8 u16 u32 u64 usize);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PackedFace<K>(pub K);
 
 /// Tetrahedral data.
@@ -237,8 +243,18 @@ impl<V> VertexDataMut for Vertex<V> {
         self.pos = vec;
     }
 }
+impl<V: Default> From<Vec3> for Vertex<V> {
+    fn from(value: Vec3) -> Self {
+        Self {
+            pos: value,
+            data: V::default(),
+        }
+    }
+}
 
 pub type BasicFace<K> = Option<(TetraId<K>, VertexIdx)>;
+
+pub type TetraPrimitive<K> = [(VertexId<K>, Option<(TetraId<K>, VertexIdx)>); 4];
 
 /// A default tetrahedron with associated data.
 ///
@@ -264,6 +280,14 @@ impl<K: Copy, F: FaceData<K> + Copy, T> TetraDataMut<K> for Tetra<K, F, T> {
     }
     fn set_face(&mut self, face: VertexIdx, val: Option<(TetraId<K>, VertexIdx)>) {
         face.in_arr_mut(&mut self.conns).1 = F::from_option(val);
+    }
+}
+impl<K, F: FaceData<K>, T: Default> From<TetraPrimitive<K>> for Tetra<K, F, T> {
+    fn from(value: TetraPrimitive<K>) -> Self {
+        Self {
+            conns: value.map(|(v, f)| (v, F::from_option(f))),
+            data: T::default(),
+        }
     }
 }
 
@@ -295,6 +319,8 @@ pub trait TetraMesh {
     type TetrasIter<'a>: Iterator<Item = (TetraId<Self::Key>, &'a Self::Tetra)>
     where
         Self: 'a;
+    /// Synchronization for
+    type SurfaceSyncState: Any + Send + Sync + Default;
 
     /// Get the vertex with the specified index.
     fn get_vertex(&self, id: VertexId<Self::Key>) -> Option<&Self::Vertex>;
@@ -314,10 +340,8 @@ pub trait TetraMesh {
     /// Get the points and faces on the outside of this mesh.
     ///
     /// This method is called "primitve" because it discards all vertex and tetrahedron information aside from the basic geometry.
-    fn primitive_surface(&self) -> (Vec<Vec3>, Vec<[u32; 3]>) {
+    fn append_primitive_surface(&self, verts: &mut Vec<Vec3>, faces: &mut Vec<[u32; 3]>) {
         let mut mapping = HashMap::new();
-        let mut verts = Vec::new();
-        let mut faces = Vec::new();
         for (_, tet) in self.tetras() {
             let mut local_verts = [None; 4];
             for idx in VertexIdx::VALS {
@@ -342,10 +366,22 @@ pub trait TetraMesh {
                 }
             }
         }
-        (verts, faces)
+    }
+    /// Synchronize a primitive surface with an already-existing one.
+    ///
+    #[allow(unused_variables)]
+    fn sync_primitive_surface(
+        &self,
+        verts: &mut Vec<Vec3>,
+        faces: &mut Vec<[u32; 3]>,
+        state: &mut Self::SurfaceSyncState,
+    ) {
+        verts.clear();
+        faces.clear();
+        self.append_primitive_surface(verts, faces);
     }
     /// Extend a collection with external points.
-    fn external_points<C: Extend<Vec3>>(&self, verts: &mut C) {
+    fn append_external_points<C: Extend<Vec3>>(&self, verts: &mut C) {
         let mut seen = HashSet::new();
         for (_, tet) in self.tetras() {
             let mut count = 0;
@@ -368,11 +404,7 @@ pub trait TetraMesh {
 }
 
 /// A mutable tetrahedral mesh.
-pub trait TetraMeshMut: TetraMesh
-where
-    Self::Vertex: VertexDataMut,
-    Self::Tetra: TetraDataMut<Self::Key>,
-{
+pub trait TetraMeshMut: TetraMesh<Vertex: VertexDataMut, Tetra: TetraDataMut<Self::Key>> {
     /// Mutably get the vertex with the specified index.
     fn get_vertex_mut(&mut self, id: VertexId<Self::Key>) -> Option<&mut Self::Vertex>;
     /// Mutably get the tetrahedron with the specified index.

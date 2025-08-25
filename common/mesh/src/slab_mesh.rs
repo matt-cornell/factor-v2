@@ -86,6 +86,7 @@ where
         = TetrasIter<'a, K, T, GEN_BITS>
     where
         Self: 'a;
+    type SurfaceSyncState = ();
 
     fn get_vertex(&self, id: VertexId<Self::Key>) -> Option<&Self::Vertex> {
         let (i, g) = id.0.unpack();
@@ -113,7 +114,7 @@ where
     fn bounds(&self) -> [Vec3; 2] {
         self.bounds
     }
-    fn external_points<C: Extend<Vec3>>(&self, verts: &mut C) {
+    fn append_external_points<C: Extend<Vec3>>(&self, verts: &mut C) {
         let mut seen = fixedbitset::FixedBitSet::with_capacity(self.verts.max_idx());
         for (_, tet) in self.tetras() {
             let mut count = 0;
@@ -153,8 +154,17 @@ where
         VertexId(K::pack(idx.index, idx.generation))
     }
     fn add_tetra(&mut self, tetra: Self::Tetra) -> TetraId<Self::Key> {
+        let adjs = VertexIdx::VALS.map(|v| (v, tetra.face(v)));
         let idx = self.tetras.insert(tetra);
-        TetraId(K::pack(idx.index, idx.generation))
+        let tet = TetraId(K::pack(idx.index, idx.generation));
+        for (v, adj) in adjs {
+            if let Some((n, i)) = adj
+                && let Some(t) = self.get_tetra_mut(n)
+            {
+                t.set_face(i, Some((tet, v)));
+            }
+        }
+        tet
     }
     fn remove_vertex(&mut self, id: VertexId<Self::Key>) -> Option<Self::Vertex> {
         let (i, g) = id.0.unpack();
@@ -162,7 +172,17 @@ where
     }
     fn remove_tetra(&mut self, id: TetraId<Self::Key>) -> Option<Self::Tetra> {
         let (i, g) = id.0.unpack();
-        self.tetras.remove(GenerationIndex::new(i, g))
+        let tet = self.tetras.remove(GenerationIndex::new(i, g));
+        if let Some(tet) = &tet {
+            for adj in VertexIdx::VALS.map(|v| tet.face(v)) {
+                if let Some((n, i)) = adj
+                    && let Some(t) = self.get_tetra_mut(n)
+                {
+                    t.set_face(i, None);
+                }
+            }
+        }
+        tet
     }
 }
 

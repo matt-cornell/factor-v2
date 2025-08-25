@@ -5,5 +5,23 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+bevy_asset = { version = "0.16.1", optional = true }
+bevy_ecs.workspace = true
+bevy_ecs_macros.workspace = true
 bevy_math.workspace = true
+bevy_render = { version = "0.16.1", optional = true }
+bytemuck = { workspace = true, optional = true }
+const_soft_float = "0.1.4"
 fixedbitset = "0.5.7"
+
+[dev-dependencies]
+bevy_flycam.workspace = true
+bevy-gui.workspace = true
+
+[features]
+default = ["render"]
+render = ["dep:bevy_asset", "dep:bevy_render", "dep:bytemuck"]
+
+[[example]]
+name = "geom"
+required-features = ["render"]
