@@ -13,7 +13,7 @@ bevy_ecs = { version = "0.16.1", default-features = false }
 bevy_ecs_macros = { version = "0.16.1", default-features = false }
 bevy_flycam = "0.16.1"
 bevy_math = { version = "0.16.1", default-features = false, features = ["std"] }
-bevy-gui = { package = "bevy", version = "0.16.1", default-features = false, features = ["bevy_log", "bevy_pbr", "bevy_render", "bevy_text", "bevy_ui", "bevy_ui_picking_backend", "bevy_window", "tonemapping_luts", "webgl2", "x11", "multi_threaded", "std"] }
+bevy-gui = { package = "bevy", version = "0.16.1", default-features = false, features = ["bevy_log", "bevy_pbr", "bevy_render", "bevy_text", "bevy_ui", "bevy_ui_picking_backend", "bevy_window", "default_font", "multi_threaded", "std", "tonemapping_luts", "webgl2", "x11"] }
 bytemuck = "1.23.2"
 
 [package]

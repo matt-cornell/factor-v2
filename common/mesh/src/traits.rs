@@ -72,6 +72,15 @@ impl VertexIdx {
             Self::V3 => (d, [a, b, c]),
         }
     }
+    /// Get the other indices, preserving the order.
+    ///
+    /// The mapping is:
+    /// ```text
+    /// V0 => [V1, V2, V3],
+    /// V1 => [V2, V3, V1],
+    /// V2 => [V3, V1, V2],
+    /// V3 => [V0, V1, V2],
+    /// ```
     pub fn others(self) -> [Self; 3] {
         match self {
             Self::V0 => [Self::V1, Self::V2, Self::V3],
@@ -80,12 +89,16 @@ impl VertexIdx {
             Self::V3 => [Self::V0, Self::V1, Self::V2],
         }
     }
-    /// Increment self, wrapping around.
-    pub fn increment(&mut self) -> &mut Self {
-        unsafe {
-            *self = std::mem::transmute::<u8, Self>((*self as u8 + 1) & 3);
+    /// Get the other vertices, in the order necessary so that the face points outwards.
+    ///
+    /// This gives the same result as [`Self::others`] for even indices and the opposite for odd indices.
+    pub fn face_order(self) -> [Self; 3] {
+        match self {
+            Self::V0 => [Self::V1, Self::V2, Self::V3],
+            Self::V1 => [Self::V0, Self::V3, Self::V2],
+            Self::V2 => [Self::V3, Self::V0, Self::V1],
+            Self::V3 => [Self::V2, Self::V1, Self::V0],
         }
-        self
     }
 }
 
@@ -345,19 +358,16 @@ pub trait TetraMesh {
         for (_, tet) in self.tetras() {
             for idx in VertexIdx::VALS {
                 if tet.face(idx).is_none() {
-                    let mut i2 = idx;
-                    let face = std::array::from_fn(|_| {
-                        *mapping
-                            .entry(tet.vertex(*i2.increment()))
-                            .or_insert_with_key(|&id| {
-                                let idx = verts.len();
-                                verts.push(
-                                    self.get_vertex(id)
-                                        .expect("face points to a non-existent vertex")
-                                        .as_vec3(),
-                                );
-                                idx as u32
-                            })
+                    let face = idx.face_order().map(|i| {
+                        *mapping.entry(tet.vertex(i)).or_insert_with_key(|&id| {
+                            let idx = verts.len();
+                            verts.push(
+                                self.get_vertex(id)
+                                    .expect("face points to a non-existent vertex")
+                                    .as_vec3(),
+                            );
+                            idx as u32
+                        })
                     });
                     faces.push(face);
                 }

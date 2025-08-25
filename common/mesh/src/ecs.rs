@@ -46,7 +46,7 @@ impl<T: TetraMesh> TetraMeshDyn for T {
             else {
                 return None.into_iter().flatten();
             };
-            Some([[a, b, c], [b, c, d], [c, d, a], [b, c, d]])
+            Some([[a, b, c], [b, a, d], [c, d, a], [d, c, b]])
                 .into_iter()
                 .flatten()
         }));
