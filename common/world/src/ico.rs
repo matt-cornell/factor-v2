@@ -4,14 +4,13 @@
 //! leaving only *ten* regions. This reduces the number of regions to only ten, rather than twenty, with a positive
 //! y-coordinate putting a point in the upper half and a negative coordinate putting it in the lower half.
 
+use crate::tree::{RegionHalf, WorldRegion};
 use bevy_math::DVec2;
 use std::f64::consts::*;
 
-use crate::tree::WorldRegion;
-
 const FRAC_2PI_5: f64 = TAU * 0.2;
 const FRAC_PI_5: f64 = TAU * 0.1;
-const TRANS_LAT: f64 = 0.5535743588970453; // atan(1/PHI)
+pub(crate) const TRANS_LAT: f64 = 0.5535743588970453; // atan(1/PHI)
 const CENTER_SLOPE: f64 = TRANS_LAT * 2.0 / FRAC_PI_5;
 
 /// Get the region and offset of a point.
@@ -68,17 +67,23 @@ pub fn region_offset_raw(lon: f64, lat: f64) -> (u8, DVec2) {
 ///
 /// See [`region_offset`] for more information on the regions.
 #[inline(always)]
-pub fn region(lon: f64, lat: f64) -> WorldRegion {
-    unsafe { WorldRegion::from_u8_unchecked(region_raw(lon, lat)) }
+pub fn region(lon: f64, lat: f64) -> (WorldRegion, RegionHalf) {
+    unsafe {
+        let raw = region_raw(lon, lat);
+        (
+            WorldRegion::from_u8_unchecked(raw >> 1),
+            RegionHalf::from_u8_unchecked(raw & 1),
+        )
+    }
 }
 /// Get the region that contains a point, as a `u8`.
 ///
-/// See [`region`] for more information.
+/// See [`region`] for more information. Note that the result of this stores the region half as the lower bit and the region in the upper four bits.
 pub fn region_raw(lon: f64, lat: f64) -> u8 {
     if lat > TRANS_LAT {
-        (lon.rem_euclid(TAU) / FRAC_2PI_5) as u8
+        ((lon.rem_euclid(TAU) / FRAC_2PI_5) as u8) << 1
     } else if lat < -TRANS_LAT {
-        ((lon + FRAC_PI_5).rem_euclid(TAU) / FRAC_2PI_5) as u8 + 5
+        (((lon + FRAC_PI_5).rem_euclid(TAU) / FRAC_2PI_5) as u8 + 5) << 1
     } else {
         let mut center = (lon.rem_euclid(TAU) / FRAC_2PI_5) as u8;
         let x = (lon + FRAC_2PI_5).rem_euclid(FRAC_2PI_5) - FRAC_PI_5;
@@ -96,7 +101,7 @@ pub fn region_raw(lon: f64, lat: f64) -> u8 {
                 center += 5;
             }
         }
-        center
+        (center << 1) | 1
     }
 }
 
@@ -139,7 +144,7 @@ mod tests {
                 let (lon, lat) = random_lonlat(rng);
                 assert_eq!(
                     region_offset(lon, lat).0,
-                    region(lon, lat),
+                    region(lon, lat).0,
                     "regions for ({lon}, {lat}) don't match"
                 );
             }
@@ -150,7 +155,7 @@ mod tests {
             let mut bins = [0usize; 10];
             for _ in 0..1000000 {
                 let (lon, lat) = random_lonlat(rng);
-                bins[region(lon, lat) as usize] += 1;
+                bins[region(lon, lat).0 as usize] += 1;
             }
             for (i, count) in bins.iter().enumerate() {
                 assert!(
