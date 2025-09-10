@@ -11,12 +11,16 @@ license = "MIT"
 bevy = { version = "0.16.1", default-features = false, features = ["bevy_log", "multi_threaded", "std"] }
 bevy_ecs = { version = "0.16.1", default-features = false }
 bevy_ecs_macros = { version = "0.16.1", default-features = false }
+bevy_egui = "0.36.0"
 bevy_flycam = "0.16.1"
 bevy_math = { version = "0.16.1", default-features = false, features = ["std"] }
+bevy_panorbit_camera = "0.28.0"
 bevy-gui = { package = "bevy", version = "0.16.1", default-features = false, features = ["bevy_log", "bevy_pbr", "bevy_render", "bevy_text", "bevy_ui", "bevy_ui_picking_backend", "bevy_window", "default_font", "multi_threaded", "std", "tonemapping_luts", "webgl2", "x11"] }
 bytemuck = "1.23.2"
+disqualified = "1.0.0"
 factor-db.path = "server/db"
 factor-world.path = "common/world"
+rand = "0.8.5"
 redb = "3.0.1"
 thiserror = "2.0.16"
 

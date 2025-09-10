@@ -6,9 +6,14 @@ license.workspace = true
 
 [dependencies]
 bevy_color = { version = "0.16.2", default-features = false, features = ["std"] }
+bevy_math.workspace = true
+disqualified.workspace = true
 factor-db.workspace = true
 factor-world.workspace = true
-redb.workspace = true
+libnoise = "1.2.0"
+rand.workspace = true
 
 [dev-dependencies]
+bevy_egui.workspace = true
+bevy_panorbit_camera = { workspace = true, features = ["bevy_egui"] }
 bevy-gui.workspace = true
