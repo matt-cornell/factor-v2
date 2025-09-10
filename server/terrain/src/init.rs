@@ -74,7 +74,7 @@ pub fn noise_source(seed: Seed) -> impl Generator<3> {
                 .map(|c| c.distance_squared(v))
                 .min_by(f32::total_cmp)
                 .unwrap()
-                .powf(0.6)
+                .powf(0.3)
                 .mul_add(-1.2, 0.3)
                 .max(-1.0) as f64
         }),
