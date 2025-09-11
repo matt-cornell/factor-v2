@@ -2048,6 +2048,7 @@ dependencies = [
  "bevy_panorbit_camera",
  "disqualified",
  "factor-db",
+ "factor-healpix",
  "factor-world",
  "libnoise",
  "rand",

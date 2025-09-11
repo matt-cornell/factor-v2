@@ -19,6 +19,7 @@ bevy-gui = { package = "bevy", version = "0.16.1", default-features = false, fea
 bytemuck = "1.23.2"
 disqualified = "1.0.0"
 factor-db.path = "server/db"
+factor-healpix.path = "common/healpix"
 factor-world.path = "common/world"
 rand = "0.8.5"
 redb = "3.0.1"

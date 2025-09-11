@@ -3,8 +3,9 @@ use bevy_gui::asset::RenderAssetUsages;
 use bevy_gui::ecs as bevy_ecs;
 use bevy_gui::prelude::*;
 use bevy_gui::render::mesh::PrimitiveTopology;
-use bevy_gui::render::render_resource::Extent3d;
+use bevy_gui::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy_gui::utils::synccell::SyncCell;
+use factor_terrain::noise;
 use libnoise::Generator;
 use std::f32::consts::FRAC_1_SQRT_2;
 use std::f64::consts::{FRAC_PI_2, PI};
@@ -26,6 +27,9 @@ struct Axes;
 #[derive(Component)]
 struct Icosahedron;
 
+#[derive(Component)]
+struct Healpix;
+
 #[derive(Debug, Resource)]
 struct Textures {
     axes_image: Handle<Image>,
@@ -43,7 +47,7 @@ struct Textures {
 #[derive(Debug)]
 struct Requests {
     axes: Mutex<Option<u32>>,
-    noise: Mutex<Option<([u8; 32], u32)>>,
+    noise: Mutex<Option<([u8; 32], u32, noise::Exclusion)>>,
     ocean: Mutex<Option<(Vec<u8>, u32, u8)>>,
 }
 
@@ -62,7 +66,7 @@ struct RenderedTexture {
 fn main() {
     let requests = Arc::new(Requests {
         axes: Mutex::new(Some(256)),
-        noise: Mutex::new(Some(([0; 32], 256))),
+        noise: Mutex::new(Some(([0; 32], 256, noise::Exclusion::None))),
         ocean: Mutex::new(None),
     });
     let (tx, rx) = mpsc::sync_channel(8);
@@ -105,17 +109,17 @@ fn main() {
                 }
             }
             'render: {
-                if let Some((seed, resolution)) =
+                if let Some((seed, resolution, exclusion)) =
                     req_clone.noise.lock().ok().and_then(|mut g| g.take())
                 {
                     let res = resolution as usize;
                     buf.resize(res * res * 8, 0);
-                    let noise = factor_terrain::init::noise_source(seed);
+                    let noise = noise::noise_source(seed, exclusion);
                     let scale = PI / res as f64;
                     for (y, row) in buf.chunks_mut(res * 8).enumerate() {
                         for (x, px) in row.chunks_mut(4).enumerate() {
                             let [r, g, b, a] = px else { unreachable!() };
-                            let arr = factor_terrain::init::to_coords(
+                            let arr = noise::to_coords(
                                 x as f64 * scale,
                                 (y as f64).mul_add(-scale, FRAC_PI_2),
                             );
@@ -186,7 +190,7 @@ fn main() {
         })
         .insert_resource(SelectedTexture::Noise)
         .insert_resource(RequestRes(requests))
-        .insert_resource(OceanLevel(128))
+        .insert_resource(OceanLevel(90))
         .run();
 }
 
@@ -203,8 +207,8 @@ fn setup(
             height: 256,
             depth_or_array_layers: 1,
         },
-        bevy_gui::render::render_resource::TextureDimension::D2,
-        bevy_gui::render::render_resource::TextureFormat::Rgba8Unorm,
+        TextureDimension::D2,
+        TextureFormat::Rgba8Unorm,
         RenderAssetUsages::RENDER_WORLD | RenderAssetUsages::MAIN_WORLD,
     );
     let axes_image = images.add(placeholder.clone());
@@ -221,7 +225,7 @@ fn setup(
     commands.spawn((
         Mesh3d(meshes.add(Sphere::new(1.0).mesh().uv(32, 18))),
         MeshMaterial3d(noise_texture.clone()),
-        Transform::IDENTITY,
+        Transform::from_rotation(Quat::from_rotation_arc(Vec3::Z, Vec3::Y)),
         Planet,
     ));
 
@@ -237,6 +241,55 @@ fn setup(
         Visibility::Hidden,
         bevy_gui::pbr::wireframe::Wireframe,
         Icosahedron,
+    ));
+
+    const X: f32 = noise::HEALPIX_TRANSITION_X as f32 * 1.5;
+    const Y: f32 = factor_healpix::TRANSITION_Z as f32 * 1.5;
+    const S: f32 = std::f32::consts::FRAC_1_SQRT_2 * 1.5;
+
+    commands.spawn((
+        Mesh3d(
+            meshes.add(
+                Mesh::new(
+                    PrimitiveTopology::TriangleList,
+                    RenderAssetUsages::RENDER_WORLD,
+                )
+                .with_inserted_attribute(
+                    Mesh::ATTRIBUTE_POSITION,
+                    vec![
+                        [0.0, 1.5, 0.0],
+                        [0.0, Y, X],
+                        [X, Y, 0.0],
+                        [0.0, Y, -X],
+                        [-X, Y, 0.0],
+                        [-S, 0.0, S],
+                        [S, 0.0, S],
+                        [S, 0.0, -S],
+                        [-S, 0.0, -S],
+                        [0.0, -Y, X],
+                        [X, -Y, 0.0],
+                        [0.0, -Y, -X],
+                        [-X, -Y, 0.0],
+                        [0.0, -1.5, 0.0],
+                    ],
+                )
+                .with_inserted_indices(bevy_gui::render::mesh::Indices::U16(vec![
+                    0, 1, 2, 0, 2, 3, 0, 3, 4, 0, 4, 1, 6, 2, 1, 7, 3, 2, 8, 4, 3, 5, 1, 4, 1, 5,
+                    6, 2, 6, 7, 3, 7, 8, 4, 8, 5, 9, 6, 5, 10, 7, 6, 11, 8, 7, 12, 5, 8, 6, 9, 10,
+                    7, 10, 11, 8, 11, 12, 5, 12, 9, 13, 10, 9, 13, 11, 10, 13, 12, 11, 13, 9, 12,
+                ])),
+            ),
+        ),
+        MeshMaterial3d(materials.add(StandardMaterial {
+            base_color: Color::linear_rgba(1.0, 1.0, 1.0, 0.2),
+            alpha_mode: AlphaMode::Blend,
+            cull_mode: None,
+            ..default()
+        })),
+        Transform::IDENTITY,
+        Visibility::Hidden,
+        bevy_gui::pbr::wireframe::Wireframe,
+        Healpix,
     ));
 
     commands.insert_resource(Textures {
@@ -301,20 +354,22 @@ fn setup(
     ));
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn ui_system(
     mut contexts: bevy_egui::EguiContexts,
     mut tex: ResMut<SelectedTexture>,
     textures: Res<Textures>,
     requests: Res<RequestRes>,
     images: Res<Assets<Image>>,
-    // mut materials: ResMut<Assets<StandardMaterial>>,
     mut ocean_level: ResMut<OceanLevel>,
     mut mat: Single<&mut MeshMaterial3d<StandardMaterial>, With<Planet>>,
     mut axes: Single<&mut Visibility, With<Axes>>,
     mut ico: Single<&mut Visibility, (With<Icosahedron>, Without<Axes>)>,
+    mut hpx: Single<&mut Visibility, (With<Healpix>, Without<Axes>, Without<Icosahedron>)>,
     mut resolution: Local<Option<u32>>,
-    mut noise_seed: Local<factor_terrain::init::Seed>,
+    mut noise_seed: Local<noise::Seed>,
+    mut exclusion: Local<noise::Exclusion>,
+    mut show_topo: Local<bool>,
 ) -> Result {
     let mut regen_noise = false;
     let ctx = contexts.ctx_mut()?;
@@ -358,18 +413,62 @@ fn ui_system(
             }
         }
         {
-            let mut v = **ico == Visibility::Visible;
+            let resp = egui::ComboBox::new("topology", "Topology")
+                .selected_text(format!("{:?}", *exclusion))
+                .show_ui(ui, |ui| {
+                    let mut v = false;
+                    v |= ui
+                        .selectable_value(&mut *exclusion, noise::Exclusion::None, "None")
+                        .changed();
+                    v |= ui
+                        .selectable_value(
+                            &mut *exclusion,
+                            noise::Exclusion::Icosahedron,
+                            "Icosahedron",
+                        )
+                        .changed();
+                    v |= ui
+                        .selectable_value(&mut *exclusion, noise::Exclusion::Healpix, "Healpix")
+                        .changed();
+                    v
+                });
+            if resp.inner.unwrap_or(false) {
+                regen_noise = true;
+                if *show_topo {
+                    match *exclusion {
+                        noise::Exclusion::None => {
+                            **ico = Visibility::Hidden;
+                            **hpx = Visibility::Hidden;
+                        }
+                        noise::Exclusion::Icosahedron => {
+                            **ico = Visibility::Visible;
+                            **hpx = Visibility::Hidden;
+                        }
+                        noise::Exclusion::Healpix => {
+                            **ico = Visibility::Hidden;
+                            **hpx = Visibility::Visible;
+                        }
+                    }
+                }
+            }
+        }
+        {
             let changed = ui
                 .horizontal(|ui| {
-                    ui.label("Icosahedron: ");
-                    ui.add(toggle(&mut v, false)).changed()
+                    ui.label("Show topology: ");
+                    ui.add(toggle(&mut show_topo, false)).changed()
                 })
                 .inner;
             if changed {
-                if v {
-                    **ico = Visibility::Visible;
+                let new = if *show_topo {
+                    Visibility::Visible
                 } else {
-                    **ico = Visibility::Hidden;
+                    Visibility::Hidden
+                };
+                match *exclusion {
+                    noise::Exclusion::Healpix => **hpx = new,
+                    noise::Exclusion::Icosahedron => **ico = new,
+                    _ => {}
                 }
             }
         }
@@ -423,7 +522,7 @@ fn ui_system(
         ui.image((textures.ocean_egui, egui::vec2(256.0, 128.0)));
     });
     if regen_noise && let Ok(mut g) = requests.0.noise.lock() {
-        *g = Some((*noise_seed, *resolution));
+        *g = Some((*noise_seed, *resolution, *exclusion));
     }
     Ok(())
 }
